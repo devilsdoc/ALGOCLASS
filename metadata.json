@@ -1,0 +1,6 @@
+{
+  "name": "CodeClass - LeetCode & Classroom LMS",
+  "description": "Full-stack LeetCode coding practice platform and classroom management system for teachers and students with interactive code execution, real-time analytics, assignments, and join codes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
