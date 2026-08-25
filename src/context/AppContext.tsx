@@ -232,7 +232,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const refreshAllData = useCallback(() => {
+  const refreshAllData = useCallback(async () => {
+    try {
+      await storage.syncWithServer();
+    } catch {
+      // ignore
+    }
     setClasses(storage.getClasses());
     setMembers(storage.getMembers());
     setAssignments(storage.getAssignments());

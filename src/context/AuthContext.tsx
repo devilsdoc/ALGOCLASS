@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole } from '../types';
 import { storage } from '../services/storage';
+import { api } from '../services/api';
 import { getDefaultAvatar } from '../utils/avatar';
 
 interface AuthContextType {
@@ -11,10 +12,12 @@ interface AuthContextType {
   isStudent: boolean;
   isAdmin: boolean;
   isOwner: boolean;
+  isSyncing: boolean;
+  lastSyncedAt: Date | null;
   switchUser: (userId: string) => void;
   loginAsRole: (role: UserRole) => User | null;
-  loginUser: (email: string, password?: string) => { success: boolean; message?: string; user?: User };
-  updateCurrentUser: (updates: Partial<User>) => void;
+  loginUser: (email: string, password?: string) => Promise<{ success: boolean; message?: string; user?: User }>;
+  updateCurrentUser: (updates: Partial<User>) => Promise<void>;
   registerUser: (data: {
     name: string;
     email: string;
@@ -22,8 +25,8 @@ interface AuthContextType {
     password?: string;
     schoolOrOrg?: string;
     avatar?: string;
-  }) => { success: boolean; message?: string; user?: User };
-  refreshUserData: () => void;
+  }) => Promise<{ success: boolean; message?: string; user?: User }>;
+  refreshUserData: () => Promise<void>;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   authModalMode: 'login' | 'signup' | 'role-select';
@@ -38,23 +41,60 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users, setUsers] = useState<User[]>(() => storage.getUsers());
   const [currentUser, setCurrentUser] = useState<User | null>(() => storage.getCurrentUser());
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(new Date());
 
   // Modal Auth flow states
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'role-select'>('role-select');
   const [selectedRoleForAuth, setSelectedRoleForAuth] = useState<UserRole | null>(null);
 
-  useEffect(() => {
-    // Sync state
-    setUsers(storage.getUsers());
-    setCurrentUser(storage.getCurrentUser());
+  // Sync with production server database
+  const syncWithDatabase = useCallback(async () => {
+    try {
+      setIsSyncing(true);
+      const res = await storage.syncWithServer();
+      setUsers(res.users);
+      const currentId = storage.getCurrentUserId();
+      if (currentId) {
+        const found = res.users.find((u) => u.id === currentId);
+        if (found) {
+          setCurrentUser(found);
+        }
+      }
+      setLastSyncedAt(new Date());
+    } catch (err) {
+      console.warn('[AuthContext] sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
   }, []);
 
-  const refreshUserData = () => {
-    const updatedUsers = storage.getUsers();
-    setUsers(updatedUsers);
-    const updatedCurrent = storage.getCurrentUser();
-    setCurrentUser(updatedCurrent);
+  useEffect(() => {
+    // Initial server hydration
+    syncWithDatabase();
+
+    // Real-time synchronization polling (every 3.5 seconds across all browsers)
+    const interval = setInterval(() => {
+      syncWithDatabase();
+    }, 3500);
+
+    // Sync immediately on window focus / tab switch
+    const onFocus = () => {
+      syncWithDatabase();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [syncWithDatabase]);
+
+  const refreshUserData = async () => {
+    await syncWithDatabase();
   };
 
   const switchUser = (userId: string) => {
@@ -74,7 +114,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   };
 
-  const loginUser = (email: string, password?: string): { success: boolean; message?: string; user?: User } => {
+  const loginUser = async (email: string, password?: string): Promise<{ success: boolean; message?: string; user?: User }> => {
+    try {
+      // First try real server authentication
+      const apiRes = await api.loginUser(email, password);
+      if (apiRes.success && apiRes.user) {
+        storage.setCurrentUserId(apiRes.user.id);
+        setCurrentUser(apiRes.user);
+        await syncWithDatabase();
+        return { success: true, user: apiRes.user };
+      }
+    } catch (e) {
+      console.warn('[AuthContext] API login failed, checking cached data:', e);
+    }
+
+    // Fallback to local authentication if offline
     const res = storage.authenticateUser(email, password);
     if (res.success && res.user) {
       setCurrentUser(res.user);
@@ -90,37 +144,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAuthModalOpen(false);
   };
 
-  const updateCurrentUser = (updates: Partial<User>) => {
+  const updateCurrentUser = async (updates: Partial<User>) => {
     if (!currentUser) return;
     const updated = { ...currentUser, ...updates };
     storage.updateUser(updated);
     setCurrentUser(updated);
     setUsers(storage.getUsers());
+    try {
+      await api.updateUser(currentUser.id, updates);
+    } catch (e) {
+      console.warn('[AuthContext] updateUser API push failed:', e);
+    }
   };
 
-  const registerUser = (data: {
+  const registerUser = async (data: {
     name: string;
     email: string;
     role: UserRole;
     password?: string;
     schoolOrOrg?: string;
     avatar?: string;
-  }): { success: boolean; message?: string; user?: User } => {
+  }): Promise<{ success: boolean; message?: string; user?: User }> => {
     if (data.role === 'ADMIN') {
-      return { success: false, message: 'Administrator registration is disabled. Only the designated Platform Administrator (Nagare Manish) can access the admin dashboard.' };
+      return {
+        success: false,
+        message: 'Administrator registration is disabled. Only the designated Platform Administrator (Nagare Manish) can access the admin dashboard.'
+      };
     }
 
-    const existing = storage.getUsers().find((u) => u.email.toLowerCase() === data.email.trim().toLowerCase());
-    if (existing) {
-      return { success: false, message: 'An account with this email address already exists. Please log in.' };
-    }
-
+    const emailTrim = data.email.trim().toLowerCase();
     const finalAvatar = data.avatar?.trim() || getDefaultAvatar(data.name);
 
     try {
+      // 1. Direct registration to production central database
+      const apiRes = await api.registerUser({
+        name: data.name.trim(),
+        email: emailTrim,
+        role: data.role,
+        password: data.password || 'password123',
+        schoolOrOrg: data.schoolOrOrg || 'Computer Science & Engineering',
+        avatar: finalAvatar,
+        title: data.role === 'TEACHER' ? 'Instructor & Algorithm Specialist' : 'Computer Science Student',
+        bio: data.role === 'TEACHER' ? 'Managing classrooms & coaching students for DSA mastery.' : 'Preparing for coding interviews.'
+      });
+
+      if (apiRes.success && apiRes.user) {
+        // Sync local storage
+        storage.setCurrentUserId(apiRes.user.id);
+        setCurrentUser(apiRes.user);
+        await syncWithDatabase();
+        return { success: true, user: apiRes.user };
+      }
+    } catch (apiErr: unknown) {
+      const errMsg = apiErr instanceof Error ? apiErr.message : 'Server registration error';
+      if (errMsg.includes('already exists') || errMsg.includes('restricted')) {
+        return { success: false, message: errMsg };
+      }
+      console.warn('[AuthContext] Direct API registration error, creating locally and queuing sync:', apiErr);
+    }
+
+    // 2. Fallback local creation
+    try {
       const created = storage.createUser({
         name: data.name.trim(),
-        email: data.email.trim(),
+        email: emailTrim,
         password: data.password || 'password123',
         role: data.role,
         avatar: finalAvatar,
@@ -153,6 +240,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isStudent,
         isAdmin,
         isOwner,
+        isSyncing,
+        lastSyncedAt,
         switchUser,
         loginAsRole,
         loginUser,

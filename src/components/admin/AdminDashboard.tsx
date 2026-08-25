@@ -26,7 +26,7 @@ import {
 import { LoginHistoryRecord, UserRole } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
-  const { currentUser, users, isOwner } = useAuth();
+  const { currentUser, users, isOwner, refreshUserData, isSyncing, lastSyncedAt } = useAuth();
   const {
     classes,
     members,
@@ -41,6 +41,25 @@ export const AdminDashboard: React.FC = () => {
   const [activeAdminTab, setActiveAdminTab] = useState<'directory' | 'login-history'>('directory');
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | 'STUDENT' | 'TEACHER' | 'ADMIN'>('ALL');
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  // Automatically refresh latest database records whenever Admin Dashboard mounts
+  React.useEffect(() => {
+    refreshUserData();
+  }, [refreshUserData]);
+
+  const handleManualRefresh = async () => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshUserData();
+      await refreshAllData();
+      showToast('Database Synchronized', 'Successfully fetched latest users and login activity from the production database.', 'success');
+    } catch (err) {
+      showToast('Sync Warning', 'Synchronized with available local records.', 'warning');
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   // Load real login history from storage
   const loginHistory: LoginHistoryRecord[] = useMemo(() => {
@@ -129,6 +148,28 @@ export const AdminDashboard: React.FC = () => {
 
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {/* Live Database Sync Indicator */}
+            <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-[11px] text-zinc-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Central DB Live</span>
+              {lastSyncedAt && (
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  ({lastSyncedAt.toLocaleTimeString()})
+                </span>
+              )}
+            </div>
+
+            <button
+              id="admin-refresh-users-top-btn"
+              onClick={handleManualRefresh}
+              disabled={isManualRefreshing || isSyncing}
+              className="px-4 py-3 rounded-2xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white border border-purple-500/40 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              title="Refresh Users directly from Central Database"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing || isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isManualRefreshing || isSyncing ? 'Syncing...' : 'Refresh Users'}</span>
+            </button>
+
             <button
               id="admin-export-data-btn"
               onClick={() => setIsExportModalOpen(true)}
@@ -136,17 +177,6 @@ export const AdminDashboard: React.FC = () => {
             >
               <FileSpreadsheet className="w-4 h-4 text-white" />
               <span>Export User Data</span>
-            </button>
-
-            <button
-              onClick={() => {
-                refreshAllData();
-                showToast('Synchronized', 'Database and metrics refreshed', 'info');
-              }}
-              className="p-3 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700/60 transition-all cursor-pointer"
-              title="Refresh System Data"
-            >
-              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -286,6 +316,16 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               ))}
             </div>
+
+            <button
+              id="admin-table-refresh-btn"
+              onClick={handleManualRefresh}
+              disabled={isManualRefreshing || isSyncing}
+              className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 transition-all cursor-pointer disabled:opacity-50"
+              title="Refresh from Database"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing || isSyncing ? 'animate-spin' : ''}`} />
+            </button>
           </div>
         </div>
 

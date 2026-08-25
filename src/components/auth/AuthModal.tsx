@@ -71,7 +71,7 @@ export const AuthModal: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -84,7 +84,7 @@ export const AuthModal: React.FC = () => {
         return;
       }
 
-      const result = loginUser(email.trim(), password);
+      const result = await loginUser(email.trim(), password);
       if (!result.success || !result.user) {
         setErrorMsg(result.message || 'Login failed. Please check your credentials.');
         setIsLoading(false);
@@ -118,7 +118,7 @@ export const AuthModal: React.FC = () => {
         return;
       }
 
-      const result = registerUser({
+      const result = await registerUser({
         name: name.trim(),
         email: email.trim(),
         password: password || 'password123',
@@ -141,7 +141,7 @@ export const AuthModal: React.FC = () => {
         } else {
           setActiveTab('student-dashboard');
         }
-      }, 600);
+      }, 500);
     }
   };
 

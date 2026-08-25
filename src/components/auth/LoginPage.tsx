@@ -93,7 +93,7 @@ export const LoginPage: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setIsLoading(true);
@@ -110,7 +110,7 @@ export const LoginPage: React.FC = () => {
         return;
       }
 
-      const result = loginUser(email.trim(), password);
+      const result = await loginUser(email.trim(), password);
       if (!result.success || !result.user) {
         setErrorMsg(result.message || 'Login failed. Please check your credentials.');
         setIsLoading(false);
@@ -150,7 +150,7 @@ export const LoginPage: React.FC = () => {
         return;
       }
 
-      const result = registerUser({
+      const result = await registerUser({
         name: name.trim(),
         email: email.trim(),
         password: password,

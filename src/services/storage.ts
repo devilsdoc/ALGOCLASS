@@ -49,6 +49,7 @@ import {
   ProblemQueryResult,
   getProblemByIdFast
 } from '../data/problemBank';
+import { api } from './api';
 
 const STORAGE_KEYS = {
   USERS: 'codeclass_clean_users_v4',
@@ -211,12 +212,20 @@ class StorageService {
     this.updateUser(user);
     this.setCurrentUserId(user.id);
     this.recordLogin(user);
+    // Asynchronously notify central database
+    api.loginUser(email, password).catch((err) => {
+      console.warn('[StorageService] Background API login sync failed:', err);
+    });
+
     return { success: true, user };
   }
 
   updateUser(updated: User): void {
     const users = this.getUsers().map((u) => (u.id === updated.id ? updated : u));
     this.save(STORAGE_KEYS.USERS, users);
+    api.updateUser(updated.id, updated).catch((err) => {
+      console.warn('[StorageService] Background API user update sync failed:', err);
+    });
   }
 
   createUser(user: Omit<User, 'id' | 'createdAt' | 'solvedCount' | 'totalSubmissions' | 'acceptedSubmissions' | 'streak' | 'lastActive'>): User {
@@ -231,7 +240,7 @@ class StorageService {
 
     const newUser: User = {
       ...user,
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       isAdmin: false,
       isOwner: false,
       streak: 1,
@@ -247,7 +256,81 @@ class StorageService {
     this.save(STORAGE_KEYS.USERS, users);
     this.setCurrentUserId(newUser.id);
     this.recordLogin(newUser);
+
+    // Asynchronously push to central database
+    api.registerUser({
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      password: newUser.password,
+      schoolOrOrg: newUser.schoolOrOrg,
+      avatar: newUser.avatar,
+      title: newUser.title,
+      bio: newUser.bio
+    }).catch((err) => {
+      console.warn('[StorageService] Background API user registration sync failed:', err);
+    });
+
     return newUser;
+  }
+
+  // CENTRAL DATABASE ASYNC SYNC
+  async syncWithServer(): Promise<{ users: User[]; loginHistory: LoginHistoryRecord[] }> {
+    try {
+      const data = await api.syncDatabase();
+      if (data) {
+        if (Array.isArray(data.users) && data.users.length > 0) {
+          this.save(STORAGE_KEYS.USERS, data.users);
+        }
+        if (Array.isArray(data.loginHistory)) {
+          this.save(STORAGE_KEYS.LOGIN_HISTORY, data.loginHistory);
+        }
+        if (Array.isArray(data.classes)) {
+          this.save(STORAGE_KEYS.CLASSES, data.classes);
+        }
+        if (Array.isArray(data.members)) {
+          this.save(STORAGE_KEYS.MEMBERS, data.members);
+        }
+        if (Array.isArray(data.assignments)) {
+          this.save(STORAGE_KEYS.ASSIGNMENTS, data.assignments);
+        }
+        if (Array.isArray(data.submissions)) {
+          this.save(STORAGE_KEYS.SUBMISSIONS, data.submissions);
+        }
+        if (Array.isArray(data.announcements)) {
+          this.save(STORAGE_KEYS.ANNOUNCEMENTS, data.announcements);
+        }
+        if (Array.isArray(data.weeklyChallenges)) {
+          this.save(STORAGE_KEYS.WEEKLY_CHALLENGES, data.weeklyChallenges);
+        }
+        if (Array.isArray(data.studentGoals)) {
+          this.save(STORAGE_KEYS.STUDENT_GOALS, data.studentGoals);
+        }
+      }
+      return {
+        users: this.getUsers(),
+        loginHistory: this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY)
+      };
+    } catch (e) {
+      console.warn('[StorageService] syncWithServer fallback to local cache:', e);
+      return {
+        users: this.getUsers(),
+        loginHistory: this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY)
+      };
+    }
+  }
+
+  async fetchLatestUsers(): Promise<User[]> {
+    try {
+      const users = await api.getUsers();
+      if (Array.isArray(users) && users.length > 0) {
+        this.save(STORAGE_KEYS.USERS, users);
+      }
+      return this.getUsers();
+    } catch (e) {
+      console.warn('[StorageService] fetchLatestUsers fallback to local cache:', e);
+      return this.getUsers();
+    }
   }
 
   // LOGIN HISTORY (REAL LOGINS ONLY, ADMIN-ONLY ACCESS)
