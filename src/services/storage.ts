@@ -50,25 +50,38 @@ import {
   getProblemByIdFast
 } from '../data/problemBank';
 import { api } from './api';
+import { createUnifiedUserRegistration } from './databaseUtils';
 
 const STORAGE_KEYS = {
-  USERS: 'codeclass_clean_users_v4',
-  CURRENT_USER_ID: 'codeclass_current_user_id_v4',
-  PROBLEMS: 'codeclass_problems_v4',
-  CLASSES: 'codeclass_classes_v4',
-  MEMBERS: 'codeclass_members_v4',
-  ASSIGNMENTS: 'codeclass_assignments_v4',
-  SUBMISSIONS: 'codeclass_submissions_v4',
-  NOTIFICATIONS: 'codeclass_notifications_v4',
-  ANNOUNCEMENTS: 'codeclass_announcements_v4',
-  WEEKLY_CHALLENGES: 'codeclass_weekly_challenges_v4',
-  STUDENT_GOALS: 'codeclass_student_goals_v4',
-  LOGIN_HISTORY: 'codeclass_login_history_v4'
+  USERS: 'codeclass_clean_users_v5',
+  CURRENT_USER_ID: 'codeclass_current_user_id_v5',
+  PROBLEMS: 'codeclass_problems_v5',
+  CLASSES: 'codeclass_classes_v5',
+  MEMBERS: 'codeclass_members_v5',
+  ASSIGNMENTS: 'codeclass_assignments_v5',
+  SUBMISSIONS: 'codeclass_submissions_v5',
+  NOTIFICATIONS: 'codeclass_notifications_v5',
+  ANNOUNCEMENTS: 'codeclass_announcements_v5',
+  WEEKLY_CHALLENGES: 'codeclass_weekly_challenges_v5',
+  STUDENT_GOALS: 'codeclass_student_goals_v5',
+  LOGIN_HISTORY: 'codeclass_login_history_v5'
 };
 
-// Purge any legacy sample data from previous builds
+// Purge any legacy sample data and test users from previous builds
 try {
   const legacyKeys = [
+    'codeclass_clean_users_v4',
+    'codeclass_current_user_id_v4',
+    'codeclass_problems_v4',
+    'codeclass_classes_v4',
+    'codeclass_members_v4',
+    'codeclass_assignments_v4',
+    'codeclass_submissions_v4',
+    'codeclass_notifications_v4',
+    'codeclass_announcements_v4',
+    'codeclass_weekly_challenges_v4',
+    'codeclass_student_goals_v4',
+    'codeclass_login_history_v4',
     'codeclass_users_v2',
     'codeclass_current_user_id_v2',
     'codeclass_problems_v2',
@@ -228,34 +241,84 @@ class StorageService {
     });
   }
 
+  deleteUser(userId: string, requester?: User | null): boolean {
+    if (userId === PRIMARY_ADMIN_USER.id) {
+      throw new Error('Access Denied: Cannot delete the platform primary administrator account.');
+    }
+
+    if (!requester || (!requester.isAdmin && !requester.isOwner && requester.role !== 'ADMIN')) {
+      throw new Error('Access Denied: Only administrators have permission to delete user accounts.');
+    }
+
+    const currentUsers = this.getUsers();
+    const updatedUsers = currentUsers.filter((u) => u.id !== userId && u.email.toLowerCase() !== PRIMARY_ADMIN_USER.email.toLowerCase());
+    
+    // Ensure primary admin is preserved
+    const sanitized = updatedUsers.some((u) => u.id === PRIMARY_ADMIN_USER.id)
+      ? updatedUsers
+      : [PRIMARY_ADMIN_USER, ...updatedUsers];
+
+    this.save(STORAGE_KEYS.USERS, sanitized);
+
+    // If deleting currently logged-in user, reset to Admin
+    if (this.getCurrentUserId() === userId) {
+      this.setCurrentUserId(PRIMARY_ADMIN_USER.id);
+    }
+
+    // Clean login history
+    const history = this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY);
+    this.save(STORAGE_KEYS.LOGIN_HISTORY, history.filter((l) => l.userId !== userId));
+
+    // Asynchronously delete from server database
+    api.deleteUser(userId).catch((err) => {
+      console.warn('[StorageService] Background API user deletion failed:', err);
+    });
+
+    return true;
+  }
+
+  purgeDummyUsers(): User[] {
+    const cleanUsers = [PRIMARY_ADMIN_USER];
+    this.save(STORAGE_KEYS.USERS, cleanUsers);
+    
+    // Retain only admin login history
+    const history = this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY);
+    this.save(STORAGE_KEYS.LOGIN_HISTORY, history.filter((l) => l.userId === PRIMARY_ADMIN_USER.id));
+
+    // If current user was a dummy, set to admin
+    const currentId = this.getCurrentUserId();
+    if (currentId !== PRIMARY_ADMIN_USER.id) {
+      this.setCurrentUserId(PRIMARY_ADMIN_USER.id);
+    }
+
+    // Notify server to purge dummy accounts
+    api.purgeDummyUsers().catch((err) => {
+      console.warn('[StorageService] Background API purge dummy users failed:', err);
+    });
+
+    return cleanUsers;
+  }
+
   createUser(user: Omit<User, 'id' | 'createdAt' | 'solvedCount' | 'totalSubmissions' | 'acceptedSubmissions' | 'streak' | 'lastActive'>): User {
-    // Only STUDENT and TEACHER can be registered dynamically; Admin is exclusively Nagare Manish
-    if (user.role === 'ADMIN') {
-      throw new Error('Administrator registration is restricted. Only the single designated platform administrator (Nagare Manish) is allowed.');
-    }
+    // Atomic unified registration for both user profile and auth record
+    const { user: newUser, loginRecord } = createUnifiedUserRegistration({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      password: user.password,
+      schoolOrOrg: user.schoolOrOrg,
+      avatar: user.avatar,
+      title: user.title,
+      bio: user.bio
+    });
 
-    if (user.role !== 'STUDENT' && user.role !== 'TEACHER') {
-      throw new Error('Access Denied: Invalid role specified.');
-    }
-
-    const newUser: User = {
-      ...user,
-      id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      isAdmin: false,
-      isOwner: false,
-      streak: 1,
-      longestStreak: 1,
-      lastLogin: new Date().toISOString(),
-      lastActive: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      solvedCount: { total: 0, easy: 0, medium: 0, hard: 0 },
-      totalSubmissions: 0,
-      acceptedSubmissions: 0
-    };
     const users = [...this.getUsers(), newUser];
     this.save(STORAGE_KEYS.USERS, users);
     this.setCurrentUserId(newUser.id);
-    this.recordLogin(newUser);
+    
+    // Save login history record
+    const currentHistory = this.getLoginHistory();
+    this.save(STORAGE_KEYS.LOGIN_HISTORY, [loginRecord, ...currentHistory]);
 
     // Asynchronously push to central database
     api.registerUser({
@@ -277,7 +340,19 @@ class StorageService {
   // CENTRAL DATABASE ASYNC SYNC
   async syncWithServer(): Promise<{ users: User[]; loginHistory: LoginHistoryRecord[] }> {
     try {
-      const data = await api.syncDatabase();
+      const localUsers = this.getUsers();
+      const localLoginHistory = this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY);
+      const localClasses = this.load<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
+      const localMembers = this.load<ClassMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+
+      // Perform bidirectional sync with server
+      const data = await api.syncDatabase({
+        users: localUsers,
+        loginHistory: localLoginHistory,
+        classes: localClasses,
+        members: localMembers
+      });
+
       if (data) {
         if (Array.isArray(data.users) && data.users.length > 0) {
           this.save(STORAGE_KEYS.USERS, data.users);
@@ -307,6 +382,7 @@ class StorageService {
           this.save(STORAGE_KEYS.STUDENT_GOALS, data.studentGoals);
         }
       }
+
       return {
         users: this.getUsers(),
         loginHistory: this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY)

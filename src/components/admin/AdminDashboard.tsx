@@ -16,17 +16,18 @@ import {
   History,
   Clock,
   Sparkles,
-  RefreshCw,
   Flame,
   Calendar,
   Briefcase,
   Layers,
-  ArrowUpDown
+  ArrowUpDown,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { LoginHistoryRecord, UserRole } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
-  const { currentUser, users, isOwner, refreshUserData, isSyncing, lastSyncedAt } = useAuth();
+  const { currentUser, users, isOwner, refreshUserData, deleteUser, purgeDummyUsers, isSyncing, lastSyncedAt } = useAuth();
   const {
     classes,
     members,
@@ -34,30 +35,51 @@ export const AdminDashboard: React.FC = () => {
     submissions,
     problems,
     setIsExportModalOpen,
-    showToast,
-    refreshAllData
+    refreshAllData,
+    showToast
   } = useApp();
 
   const [activeAdminTab, setActiveAdminTab] = useState<'directory' | 'login-history'>('directory');
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | 'STUDENT' | 'TEACHER' | 'ADMIN'>('ALL');
-  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   // Automatically refresh latest database records whenever Admin Dashboard mounts
   React.useEffect(() => {
     refreshUserData();
-  }, [refreshUserData]);
+    refreshAllData();
+  }, [refreshUserData, refreshAllData]);
 
-  const handleManualRefresh = async () => {
-    setIsManualRefreshing(true);
+  const handlePurgeDummyUsers = async () => {
+    if (!window.confirm('Are you sure you want to remove all dummy users? Only the primary administrator will be retained.')) {
+      return;
+    }
+    setIsPurging(true);
     try {
-      await refreshUserData();
+      await purgeDummyUsers();
       await refreshAllData();
-      showToast('Database Synchronized', 'Successfully fetched latest users and login activity from the production database.', 'success');
-    } catch (err) {
-      showToast('Sync Warning', 'Synchronized with available local records.', 'warning');
+      showToast('Dummy Users Purged', 'All test and dummy user accounts have been successfully removed.', 'success');
+    } catch (err: any) {
+      showToast('Purge Failed', err?.message || 'Failed to purge dummy users.', 'error');
     } finally {
-      setIsManualRefreshing(false);
+      setIsPurging(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (!window.confirm(`Are you sure you want to delete user "${userName}"? This action cannot be undone.`)) {
+      return;
+    }
+    setDeletingUserId(userId);
+    try {
+      await deleteUser(userId);
+      await refreshAllData();
+      showToast('User Removed', `Account for "${userName}" has been deleted.`, 'success');
+    } catch (err: any) {
+      showToast('Deletion Failed', err?.message || 'Failed to delete user.', 'error');
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -149,26 +171,28 @@ export const AdminDashboard: React.FC = () => {
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             {/* Live Database Sync Indicator */}
-            <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-[11px] text-zinc-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Central DB Live</span>
-              {lastSyncedAt && (
+            <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-[11px] text-zinc-300 shadow-inner">
+              <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-spin' : 'bg-emerald-400 animate-pulse'}`} />
+              <span className="font-medium text-zinc-200">{isSyncing ? 'Syncing with Server...' : 'Live Auto-Sync'}</span>
+              {lastSyncedAt && !isSyncing && (
                 <span className="text-[10px] text-zinc-500 font-mono">
                   ({lastSyncedAt.toLocaleTimeString()})
                 </span>
               )}
             </div>
 
-            <button
-              id="admin-refresh-users-top-btn"
-              onClick={handleManualRefresh}
-              disabled={isManualRefreshing || isSyncing}
-              className="px-4 py-3 rounded-2xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 hover:text-white border border-purple-500/40 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              title="Refresh Users directly from Central Database"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing || isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isManualRefreshing || isSyncing ? 'Syncing...' : 'Refresh Users'}</span>
-            </button>
+            {users.length > 1 && (
+              <button
+                id="admin-purge-dummy-users-btn"
+                onClick={handlePurgeDummyUsers}
+                disabled={isPurging}
+                className="px-4 py-3 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title="Remove all dummy and test users, keeping only the primary administrator"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>{isPurging ? 'Purging...' : 'Purge Dummy Users'}</span>
+              </button>
+            )}
 
             <button
               id="admin-export-data-btn"
@@ -316,16 +340,6 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               ))}
             </div>
-
-            <button
-              id="admin-table-refresh-btn"
-              onClick={handleManualRefresh}
-              disabled={isManualRefreshing || isSyncing}
-              className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 transition-all cursor-pointer disabled:opacity-50"
-              title="Refresh from Database"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isManualRefreshing || isSyncing ? 'animate-spin' : ''}`} />
-            </button>
           </div>
         </div>
 
@@ -343,12 +357,13 @@ export const AdminDashboard: React.FC = () => {
                     <th className="px-4 py-3">Account Created</th>
                     <th className="px-4 py-3">Last Login</th>
                     <th className="px-4 py-3">Last Active</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-zinc-500">
+                      <td colSpan={8} className="px-4 py-12 text-center text-zinc-500">
                         <Users className="w-8 h-8 mx-auto text-zinc-600 mb-2 opacity-60" />
                         <div className="font-semibold text-zinc-400">No users found</div>
                         <div className="text-[11px] text-zinc-600 mt-0.5">
@@ -361,6 +376,7 @@ export const AdminDashboard: React.FC = () => {
                   ) : (
                     filteredUsers.map((u) => {
                       const isCurrent = currentUser?.id === u.id;
+                      const isPrimaryAdmin = u.role === 'ADMIN' || u.id === 'admin-1';
                       return (
                         <tr
                           key={u.id}
@@ -440,6 +456,23 @@ export const AdminDashboard: React.FC = () => {
                               hour: '2-digit',
                               minute: '2-digit'
                             })}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            {!isPrimaryAdmin ? (
+                              <button
+                                onClick={() => handleDeleteUser(u.id, u.name)}
+                                disabled={deletingUserId === u.id}
+                                className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                                title={`Delete user ${u.name}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-zinc-600 font-medium px-2 py-1">
+                                System Protected
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );

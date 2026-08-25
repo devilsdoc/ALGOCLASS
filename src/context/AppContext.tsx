@@ -265,6 +265,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [currentUser?.id]);
 
+  // Automatic real-time background sync for all platform data
+  useEffect(() => {
+    refreshAllData();
+
+    const interval = setInterval(() => {
+      refreshAllData();
+    }, 4000);
+
+    const handleFocus = () => {
+      refreshAllData();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+    };
+  }, [refreshAllData]);
+
   // Adjust active tab when switching role if incompatible
   useEffect(() => {
     if (isTeacher) {

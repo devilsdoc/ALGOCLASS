@@ -26,7 +26,9 @@ interface AuthContextType {
     schoolOrOrg?: string;
     avatar?: string;
   }) => Promise<{ success: boolean; message?: string; user?: User }>;
-  refreshUserData: () => Promise<void>;
+  refreshUserData: () => Promise<User[]>;
+  deleteUser: (userId: string) => Promise<boolean>;
+  purgeDummyUsers: () => Promise<void>;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   authModalMode: 'login' | 'signup' | 'role-select';
@@ -50,21 +52,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [selectedRoleForAuth, setSelectedRoleForAuth] = useState<UserRole | null>(null);
 
   // Sync with production server database
-  const syncWithDatabase = useCallback(async () => {
+  const syncWithDatabase = useCallback(async (): Promise<User[]> => {
     try {
       setIsSyncing(true);
       const res = await storage.syncWithServer();
-      setUsers(res.users);
+      const freshUsers = [...res.users];
+      setUsers(freshUsers);
       const currentId = storage.getCurrentUserId();
       if (currentId) {
-        const found = res.users.find((u) => u.id === currentId);
+        const found = freshUsers.find((u) => u.id === currentId);
         if (found) {
           setCurrentUser(found);
         }
       }
       setLastSyncedAt(new Date());
+      return freshUsers;
     } catch (err) {
       console.warn('[AuthContext] sync error:', err);
+      const fallback = [...storage.getUsers()];
+      setUsers(fallback);
+      return fallback;
     } finally {
       setIsSyncing(false);
     }
@@ -93,8 +100,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [syncWithDatabase]);
 
-  const refreshUserData = async () => {
-    await syncWithDatabase();
+  const refreshUserData = async (): Promise<User[]> => {
+    return await syncWithDatabase();
   };
 
   const switchUser = (userId: string) => {
@@ -224,6 +231,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteUser = async (userId: string): Promise<boolean> => {
+    try {
+      storage.deleteUser(userId, currentUser);
+      await api.deleteUser(userId);
+      setUsers(storage.getUsers());
+      return true;
+    } catch (err) {
+      console.error('[AuthContext] Failed to delete user:', err);
+      throw err;
+    }
+  };
+
+  const purgeDummyUsers = async (): Promise<void> => {
+    try {
+      const cleanUsers = storage.purgeDummyUsers();
+      await api.purgeDummyUsers();
+      setUsers(cleanUsers);
+    } catch (err) {
+      console.error('[AuthContext] Failed to purge dummy users:', err);
+      throw err;
+    }
+  };
+
   const isTeacher = currentUser?.role === 'TEACHER';
   const isStudent = currentUser?.role === 'STUDENT';
   const isAdmin = currentUser?.role === 'ADMIN' || Boolean(currentUser?.isAdmin) || Boolean(currentUser?.isOwner);
@@ -248,6 +278,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateCurrentUser,
         registerUser,
         refreshUserData,
+        deleteUser,
+        purgeDummyUsers,
         isAuthModalOpen,
         setIsAuthModalOpen,
         authModalMode,

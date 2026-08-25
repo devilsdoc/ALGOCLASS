@@ -17,6 +17,7 @@ import {
 } from './src/types';
 import { MASTER_PROBLEM_BANK } from './src/data/problemBank';
 import { PRIMARY_ADMIN_USER } from './src/data/mockData';
+import { createUnifiedUserRegistration } from './src/services/databaseUtils';
 
 // Production Database Schema
 interface DatabaseSchema {
@@ -154,8 +155,18 @@ async function startServer() {
   // CENTRAL PRODUCTION REST API ENDPOINTS
   // ==========================================
 
+  // Cache-control middleware for all API routes
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    next();
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
+    inMemoryDb = loadDb();
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -165,13 +176,92 @@ async function startServer() {
     });
   });
 
-  // 1. FULL SYNC ENDPOINT
+  // 1. FULL SYNC ENDPOINT (GET)
   app.get('/api/sync', (req, res) => {
+    inMemoryDb = loadDb();
+    res.json(inMemoryDb);
+  });
+
+  // 1b. BIDIRECTIONAL SYNC MERGE ENDPOINT (POST)
+  app.post('/api/sync', (req, res) => {
+    inMemoryDb = loadDb();
+    const clientData = req.body as Partial<DatabaseSchema>;
+    let hasChanges = false;
+
+    // Merge incoming users
+    if (Array.isArray(clientData.users)) {
+      clientData.users.forEach((clientUser) => {
+        if (!clientUser || !clientUser.email) return;
+        const emailTrim = clientUser.email.trim().toLowerCase();
+        const existingIdx = inMemoryDb.users.findIndex((u) => u.email.toLowerCase() === emailTrim || u.id === clientUser.id);
+        if (existingIdx === -1) {
+          // New user to add to server DB
+          if (clientUser.role !== 'ADMIN') {
+            inMemoryDb.users.push(clientUser);
+            hasChanges = true;
+          }
+        } else {
+          // Update existing non-admin user stats
+          const existing = inMemoryDb.users[existingIdx];
+          if (existing.email.toLowerCase() !== PRIMARY_ADMIN_USER.email.toLowerCase()) {
+            inMemoryDb.users[existingIdx] = {
+              ...existing,
+              ...clientUser,
+              id: existing.id,
+              role: existing.role
+            };
+            hasChanges = true;
+          }
+        }
+      });
+    }
+
+    // Merge login records
+    if (Array.isArray(clientData.loginHistory)) {
+      clientData.loginHistory.forEach((rec) => {
+        if (!rec || !rec.id) return;
+        const exists = inMemoryDb.loginHistory.some((l) => l.id === rec.id);
+        if (!exists) {
+          inMemoryDb.loginHistory.unshift(rec);
+          hasChanges = true;
+        }
+      });
+    }
+
+    // Merge classes
+    if (Array.isArray(clientData.classes)) {
+      clientData.classes.forEach((cls) => {
+        if (!cls || !cls.id) return;
+        const exists = inMemoryDb.classes.some((c) => c.id === cls.id);
+        if (!exists) {
+          inMemoryDb.classes.push(cls);
+          hasChanges = true;
+        }
+      });
+    }
+
+    // Merge members
+    if (Array.isArray(clientData.members)) {
+      clientData.members.forEach((mem) => {
+        if (!mem || !mem.id) return;
+        const exists = inMemoryDb.members.some((m) => m.id === mem.id);
+        if (!exists) {
+          inMemoryDb.members.push(mem);
+          hasChanges = true;
+        }
+      });
+    }
+
+    if (hasChanges) {
+      saveDb(inMemoryDb);
+    }
+
     res.json(inMemoryDb);
   });
 
   // 2. USERS MANAGEMENT
   app.get('/api/users', (req, res) => {
+    inMemoryDb = loadDb();
     res.json(inMemoryDb.users);
   });
 
@@ -184,71 +274,61 @@ async function startServer() {
     res.json(user);
   });
 
-  // User Registration
+  // User Registration (Unified Atomic Operation)
   app.post('/api/auth/register', (req, res) => {
-    const { name, email, role, password, schoolOrOrg, avatar, title, bio } = req.body;
+    try {
+      const { name, email, role, password, schoolOrOrg, avatar, title, bio } = req.body;
 
-    if (!name || !email || !role) {
-      res.status(400).json({ success: false, message: 'Name, email, and role are required.' });
-      return;
-    }
+      if (!name || !email || !role) {
+        res.status(400).json({ success: false, message: 'Name, email, and role are required.' });
+        return;
+      }
 
-    if (role === 'ADMIN') {
-      res.status(403).json({
-        success: false,
-        message: 'Administrator registration is restricted. Only the single designated platform administrator (Nagare Manish) is permitted.'
+      if (role === 'ADMIN') {
+        res.status(403).json({
+          success: false,
+          message: 'Administrator registration is restricted. Only the single designated platform administrator (Nagare Manish) is permitted.'
+        });
+        return;
+      }
+
+      const emailTrim = String(email).trim().toLowerCase();
+      const existing = inMemoryDb.users.find((u) => u.email.toLowerCase() === emailTrim);
+      if (existing) {
+        res.status(409).json({ success: false, message: 'An account with this email address already exists. Please log in.' });
+        return;
+      }
+
+      // Execute unified atomic registration: creates both Auth and User Profile records
+      const { user: newUser, loginRecord, authRecord } = createUnifiedUserRegistration({
+        name,
+        email: emailTrim,
+        role,
+        password,
+        schoolOrOrg,
+        avatar,
+        title,
+        bio
       });
-      return;
+
+      inMemoryDb.users.push(newUser);
+      inMemoryDb.loginHistory.unshift(loginRecord);
+
+      saveDb(inMemoryDb);
+      res.status(201).json({
+        success: true,
+        user: newUser,
+        authRecord,
+        loginRecord,
+        message: 'Account and user profile registered atomically.'
+      });
+    } catch (err: any) {
+      console.error('Registration error in /api/auth/register:', err);
+      res.status(400).json({
+        success: false,
+        message: err?.message || 'Failed to complete user registration.'
+      });
     }
-
-    const emailTrim = email.trim().toLowerCase();
-    const existing = inMemoryDb.users.find((u) => u.email.toLowerCase() === emailTrim);
-    if (existing) {
-      res.status(409).json({ success: false, message: 'An account with this email address already exists. Please log in.' });
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const newUser: User = {
-      id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      name: name.trim(),
-      email: emailTrim,
-      password: password || 'password123',
-      role: role as 'STUDENT' | 'TEACHER',
-      isAdmin: false,
-      isOwner: false,
-      avatar: avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
-      title: title || (role === 'TEACHER' ? 'Instructor & Algorithm Specialist' : 'Computer Science Student'),
-      bio: bio || (role === 'TEACHER' ? 'Managing classrooms & coaching students for DSA mastery.' : 'Preparing for coding interviews.'),
-      schoolOrOrg: schoolOrOrg || 'Computer Science & Engineering',
-      streak: 1,
-      longestStreak: 1,
-      lastLogin: now,
-      lastActive: now,
-      createdAt: now,
-      solvedCount: { total: 0, easy: 0, medium: 0, hard: 0 },
-      totalSubmissions: 0,
-      acceptedSubmissions: 0
-    };
-
-    inMemoryDb.users.push(newUser);
-
-    // Record login event for new user
-    const loginRecord: LoginHistoryRecord = {
-      id: `login-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      userId: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      loginDate: now.split('T')[0],
-      loginTime: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      lastLogin: now,
-      lastActive: now
-    };
-    inMemoryDb.loginHistory.unshift(loginRecord);
-
-    saveDb(inMemoryDb);
-    res.status(201).json({ success: true, user: newUser });
   });
 
   // User Login
@@ -328,6 +408,39 @@ async function startServer() {
 
     saveDb(inMemoryDb);
     res.json(inMemoryDb.users[index]);
+  });
+
+  // Delete user (Admin only, cannot delete Primary Admin)
+  app.delete('/api/users/:id', (req, res) => {
+    const userId = req.params.id;
+    if (userId === PRIMARY_ADMIN_USER.id) {
+      res.status(403).json({ success: false, message: 'Cannot delete the platform primary administrator account.' });
+      return;
+    }
+
+    const initialCount = inMemoryDb.users.length;
+    inMemoryDb.users = inMemoryDb.users.filter((u) => u.id !== userId && u.email.toLowerCase() !== PRIMARY_ADMIN_USER.email.toLowerCase());
+    inMemoryDb.members = inMemoryDb.members.filter((m) => m.studentId !== userId);
+    inMemoryDb.submissions = inMemoryDb.submissions.filter((s) => s.studentId !== userId);
+    inMemoryDb.loginHistory = inMemoryDb.loginHistory.filter((l) => l.userId !== userId);
+
+    // Guarantee admin remains
+    if (!inMemoryDb.users.some((u) => u.id === PRIMARY_ADMIN_USER.id)) {
+      inMemoryDb.users.unshift(PRIMARY_ADMIN_USER);
+    }
+
+    saveDb(inMemoryDb);
+    res.json({ success: true, deleted: initialCount > inMemoryDb.users.length });
+  });
+
+  // Purge all dummy/non-admin users
+  app.post('/api/users/purge-dummy', (req, res) => {
+    inMemoryDb.users = [PRIMARY_ADMIN_USER];
+    inMemoryDb.loginHistory = inMemoryDb.loginHistory.filter((l) => l.userId === PRIMARY_ADMIN_USER.id);
+    inMemoryDb.members = [];
+    inMemoryDb.submissions = [];
+    saveDb(inMemoryDb);
+    res.json({ success: true, message: 'All dummy users removed. Only primary administrator retained.', users: inMemoryDb.users });
   });
 
   // 3. LOGIN HISTORY

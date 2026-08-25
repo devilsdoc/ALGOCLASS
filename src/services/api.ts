@@ -33,10 +33,16 @@ class ApiService {
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     try {
-      const res = await fetch(`${this.baseUrl}${endpoint}`, {
+      const separator = endpoint.includes('?') ? '&' : '?';
+      const cacheBustUrl = `${this.baseUrl}${endpoint}${separator}_t=${Date.now()}`;
+
+      const res = await fetch(cacheBustUrl, {
+        cache: 'no-store',
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
           ...(options?.headers || {})
         }
       });
@@ -62,7 +68,13 @@ class ApiService {
   }
 
   // 1. SYNC
-  async syncDatabase(): Promise<DatabaseState> {
+  async syncDatabase(localData?: Partial<DatabaseState>): Promise<DatabaseState> {
+    if (localData) {
+      return this.request<DatabaseState>('/api/sync', {
+        method: 'POST',
+        body: JSON.stringify(localData)
+      });
+    }
     return this.request<DatabaseState>('/api/sync');
   }
 
@@ -105,6 +117,18 @@ class ApiService {
     return this.request<User>(`/api/users/${userId}`, {
       method: 'PUT',
       body: JSON.stringify(updates)
+    });
+  }
+
+  async deleteUser(userId: string): Promise<{ success: boolean; deleted?: boolean; message?: string }> {
+    return this.request<{ success: boolean; deleted?: boolean; message?: string }>(`/api/users/${userId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async purgeDummyUsers(): Promise<{ success: boolean; message: string; users: User[] }> {
+    return this.request<{ success: boolean; message: string; users: User[] }>('/api/users/purge-dummy', {
+      method: 'POST'
     });
   }
 
