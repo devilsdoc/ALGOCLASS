@@ -88,7 +88,7 @@ export const Navbar: React.FC = () => {
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-lg text-white tracking-tight">Algo<span className="text-amber-400">Class</span></span>
+                <span className="font-extrabold text-lg text-white tracking-tight">Mash<span className="text-indigo-400">Code</span></span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
                   isAdmin || isOwner
                     ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'

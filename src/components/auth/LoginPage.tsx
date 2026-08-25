@@ -165,7 +165,7 @@ export const LoginPage: React.FC = () => {
         return;
       }
 
-      showToast('Account Created', `Welcome to CodeClass, ${result.user.name}!`, 'success');
+      showToast('Account Created', `Welcome to MashCode, ${result.user.name}!`, 'success');
       setActiveTab('dashboard');
       setIsLoading(false);
     }
@@ -188,7 +188,7 @@ export const LoginPage: React.FC = () => {
           </div>
           <div>
             <div className="font-extrabold text-lg tracking-tight text-white flex items-center gap-1.5">
-              <span>CodeClass</span>
+              <span>MashCode</span>
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                 LMS
               </span>
@@ -218,7 +218,7 @@ export const LoginPage: React.FC = () => {
                     <span>Select Authentication Portal</span>
                   </div>
                   <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-                    Welcome to CodeClass
+                    Welcome to MashCode
                   </h1>
                   <p className="text-sm text-zinc-400 leading-relaxed">
                     Please select your role to proceed to your dedicated authentication portal.
@@ -609,7 +609,7 @@ export const LoginPage: React.FC = () => {
 
       {/* Footer */}
       <footer className="w-full max-w-7xl mx-auto px-6 py-6 text-center text-xs text-zinc-500 border-t border-zinc-900 z-10">
-        <span>CodeClass LMS &copy; {new Date().getFullYear()} • Secure Role-Based Authentication &amp; Algorithmic Learning</span>
+        <span>MashCode LMS &copy; {new Date().getFullYear()} • Secure Role-Based Authentication &amp; Algorithmic Learning</span>
       </footer>
     </div>
   );

@@ -307,7 +307,7 @@ export class AdminExportService {
 
     // 5. Initialize ExcelJS Workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = `AlgoClass Admin (${requesterUser.name})`;
+    workbook.creator = `MashCode Admin (${requesterUser.name})`;
     workbook.lastModifiedBy = requesterUser.name;
     workbook.created = new Date();
     workbook.modified = new Date();
@@ -547,11 +547,11 @@ export class AdminExportService {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
 
-    // 7. Generate filename strictly matching AlgoClass_User_Data_YYYY-MM-DD.xlsx
+    // 7. Generate filename strictly matching MashCode_User_Data_YYYY-MM-DD.xlsx
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, '0');
     const dateFormatted = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const fileName = `AlgoClass_User_Data_${dateFormatted}.xlsx`;
+    const fileName = `MashCode_User_Data_${dateFormatted}.xlsx`;
 
     return {
       blob,

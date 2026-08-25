@@ -229,7 +229,7 @@ export const Sidebar: React.FC = () => {
 
         <div className="text-[10px] text-zinc-600 text-center flex items-center justify-center gap-1">
           <Sparkles className="w-3 h-3 text-indigo-500" />
-          <span>AlgoClass Real-Time Sync v2.4</span>
+          <span>MashCode Real-Time Sync v2.4</span>
         </div>
       </div>
     </aside>

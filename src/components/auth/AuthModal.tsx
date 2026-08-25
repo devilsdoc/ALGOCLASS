@@ -132,7 +132,7 @@ export const AuthModal: React.FC = () => {
         return;
       }
 
-      setSuccessMsg(`Account created! Welcome to AlgoClassroom, ${result.user.name}.`);
+      setSuccessMsg(`Account created! Welcome to MashCode, ${result.user.name}.`);
       setTimeout(() => {
         setIsLoading(false);
         handleClose();
@@ -192,7 +192,7 @@ export const AuthModal: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-white">AlgoClassroom</span>
+                <span className="font-bold text-lg text-white">MashCode</span>
                 <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
                   Role Auth
                 </span>

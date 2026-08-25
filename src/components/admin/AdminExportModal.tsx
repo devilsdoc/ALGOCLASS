@@ -434,7 +434,7 @@ export const AdminExportModal: React.FC = () => {
                   <br />✓ <strong>Real Data Only:</strong> No fake rows or sample data. Empty roles remain formatted with clean headers.
                   <br />✓ <strong>Generated File:</strong>{' '}
                   <code className="bg-emerald-100 dark:bg-emerald-900/60 px-1 py-0.5 rounded font-mono text-[10px]">
-                    AlgoClass_User_Data_YYYY-MM-DD.xlsx
+                    MashCode_User_Data_YYYY-MM-DD.xlsx
                   </code>
                 </p>
               </div>
