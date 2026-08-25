@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { storage } from '../../services/storage';
+import { getDefaultAvatar } from '../../utils/avatar';
 import {
   User,
   Settings,
@@ -19,27 +20,30 @@ import {
   ShieldAlert,
   Users,
   Database,
-  Lock
+  Lock,
+  LogOut,
+  Upload,
+  Image as ImageIcon,
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
 
 export const ProfileSettingsView: React.FC = () => {
-  const { currentUser, updateCurrentUser, isTeacher, isAdmin, isOwner, switchUser, users } = useAuth();
+  const { currentUser, updateCurrentUser, isTeacher, isAdmin, isOwner, switchUser, users, logout } = useAuth();
   const { showToast, refreshAllData, setIsExportModalOpen } = useApp();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (!currentUser) return null;
 
   const [name, setName] = useState(currentUser.name);
   const [email, setEmail] = useState(currentUser.email);
   const [school, setSchool] = useState(currentUser.schoolOrOrg || 'Stanford CS Department');
-
-  const avatarOptions = [
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80'
-  ];
+  const [isUploading, setIsUploading] = useState(false);
 
   const adminAccount = users.find((u) => u.role === 'ADMIN' || u.id === 'admin-1');
+
+  const defaultAvatarUri = getDefaultAvatar(currentUser.name);
+  const isUsingDefaultAvatar = currentUser.avatar.startsWith('data:image/svg+xml') || currentUser.avatar === defaultAvatarUri;
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,9 +55,41 @@ export const ProfileSettingsView: React.FC = () => {
     showToast('Profile Updated! 👤', 'Your profile details were saved successfully.', 'success');
   };
 
-  const handleSelectAvatar = (url: string) => {
-    updateCurrentUser({ avatar: url });
-    showToast('Avatar Updated! 📸', 'New profile picture applied.', 'success');
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Invalid File', 'Please select a valid image file (PNG, JPG, WebP).', 'error');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('File Too Large', 'Please select an image smaller than 5MB.', 'error');
+      return;
+    }
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        updateCurrentUser({ avatar: result });
+        showToast('Photo Updated! 📸', 'Your custom profile photo has been applied.', 'success');
+      }
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      showToast('Upload Failed', 'Could not process the selected image.', 'error');
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleResetToDefault = () => {
+    const defaultAvatar = getDefaultAvatar(name || currentUser.name);
+    updateCurrentUser({ avatar: defaultAvatar });
+    showToast('Default Avatar Restored 🔄', 'Your profile photo was reset to the default avatar.', 'info');
   };
 
   const handleResetData = () => {
@@ -73,7 +109,7 @@ export const ProfileSettingsView: React.FC = () => {
           User Profile & Application Settings
         </h1>
         <p className="text-xs text-zinc-400 mt-1">
-          Manage your account credentials, avatar, role configurations, and persistent workspace storage
+          Manage your account credentials, profile photo, role configurations, and persistent workspace storage
         </p>
       </div>
 
@@ -84,7 +120,7 @@ export const ProfileSettingsView: React.FC = () => {
             <img
               src={currentUser.avatar}
               alt={currentUser.name}
-              className="w-20 h-20 rounded-3xl object-cover ring-4 ring-indigo-500/40 shadow-2xl"
+              className="w-20 h-20 rounded-3xl object-cover ring-4 ring-indigo-500/40 shadow-2xl bg-zinc-950"
             />
             <span className="absolute -bottom-1 -right-1 p-1 bg-indigo-600 text-white rounded-xl shadow">
               <Sparkles className="w-3.5 h-3.5" />
@@ -96,6 +132,9 @@ export const ProfileSettingsView: React.FC = () => {
               <h2 className="text-xl font-bold text-white">{currentUser.name}</h2>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                 {currentUser.role}
+              </span>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
+                {isUsingDefaultAvatar ? 'Default Avatar' : 'Custom Photo'}
               </span>
             </div>
             <p className="text-xs text-zinc-400">{currentUser.email}</p>
@@ -110,31 +149,52 @@ export const ProfileSettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Change Avatar Grid */}
-        <div>
-          <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2">
-            Select Profile Avatar
-          </label>
-          <div className="flex flex-wrap gap-3">
-            {avatarOptions.map((avatar, idx) => (
+        {/* Profile Photo Section (Custom Upload or Keep Default) */}
+        <div className="space-y-3 p-5 rounded-2xl bg-zinc-950/60 border border-zinc-800/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <label className="block text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                Profile Photo
+              </label>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Upload your own custom photo from your device, or keep the default initials avatar.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="profile-photo-file-input"
+              />
+
               <button
-                key={idx}
                 type="button"
-                onClick={() => handleSelectAvatar(avatar)}
-                className={`relative rounded-2xl overflow-hidden ring-2 transition-all ${
-                  currentUser.avatar === avatar
-                    ? 'ring-indigo-500 scale-105 shadow-lg shadow-indigo-500/30'
-                    : 'ring-transparent hover:ring-zinc-600 opacity-70 hover:opacity-100'
-                }`}
+                id="btn-upload-profile-photo"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/20 disabled:opacity-50"
               >
-                <img src={avatar} alt="" className="w-12 h-12 object-cover" />
-                {currentUser.avatar === avatar && (
-                  <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center text-white">
-                    <Check className="w-4 h-4" />
-                  </div>
-                )}
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isUploading ? 'Uploading...' : 'Upload Your Photo'}</span>
               </button>
-            ))}
+
+              {!isUsingDefaultAvatar && (
+                <button
+                  type="button"
+                  id="btn-reset-default-avatar"
+                  onClick={handleResetToDefault}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Reset to default initials avatar"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset to Default</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -222,23 +282,14 @@ export const ProfileSettingsView: React.FC = () => {
             </span>
           </div>
 
-          {!isAdmin && !isOwner && adminAccount && (
-            <button
-              onClick={() => {
-                switchUser(adminAccount.id);
-                showToast('Admin Switched', `Now logged in as ${adminAccount.name}.`, 'info');
-              }}
-              className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-semibold"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              Switch to Platform Admin
-            </button>
-          )}
-
-          {(isAdmin || isOwner) && (
+          {(isAdmin || isOwner) ? (
             <span className="text-emerald-400 font-semibold flex items-center gap-1">
               <Check className="w-3.5 h-3.5" />
-              Admin Authorized ({currentUser.name})
+              Platform Administrator ({currentUser.name})
+            </span>
+          ) : (
+            <span className="text-zinc-500 text-[11px]">
+              Platform Admin: Nagare Manish
             </span>
           )}
         </div>
@@ -258,12 +309,34 @@ export const ProfileSettingsView: React.FC = () => {
           <span className="text-xs text-zinc-500">Storage Engine: LocalStorage Active</span>
           <button
             onClick={handleResetData}
-            className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-colors flex items-center gap-1.5"
+            className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Reset Demo Data</span>
           </button>
         </div>
+      </div>
+
+      {/* Account Session & Logout Card */}
+      <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <LogOut className="w-4 h-4 text-rose-400" />
+            Account Session & Sign Out
+          </h3>
+          <p className="text-xs text-zinc-400 mt-1">
+            End your current active session and return to the login portal.
+          </p>
+        </div>
+
+        <button
+          onClick={logout}
+          id="btn-profile-logout"
+          className="px-5 py-2.5 rounded-2xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-950/20 shrink-0"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Log Out of Session</span>
+        </button>
       </div>
     </div>
   );

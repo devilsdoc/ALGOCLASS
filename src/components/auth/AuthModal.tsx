@@ -39,7 +39,7 @@ export const AuthModal: React.FC = () => {
   const { setActiveTab } = useApp();
 
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('password123');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [schoolOrOrg, setSchoolOrOrg] = useState('');
@@ -61,11 +61,10 @@ export const AuthModal: React.FC = () => {
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    // Pre-fill demo accounts for convenience if available
     const defaultUser = users.find((u) => u.role === role);
-    if (defaultUser) {
+    if (defaultUser && targetMode === 'login') {
       setEmail(defaultUser.email);
-      setPassword('password123');
+      setPassword('');
     } else {
       setEmail('');
       setPassword('');
@@ -451,7 +450,6 @@ export const AuthModal: React.FC = () => {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs font-medium text-zinc-300">Password</label>
-                      <span className="text-[11px] text-zinc-500">Default: password123</span>
                     </div>
                     <div className="relative">
                       <Lock className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500" />

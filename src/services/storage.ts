@@ -25,10 +25,12 @@ import {
   ClassAnalyticsSummary,
   AnalyticsTimeframe,
   TopicPerformanceStat,
-  ProblemCategory
+  ProblemCategory,
+  LoginHistoryRecord
 } from '../types';
 import {
   INITIAL_USERS,
+  PRIMARY_ADMIN_USER,
   INITIAL_PROBLEMS,
   INITIAL_CLASSES,
   INITIAL_MEMBERS,
@@ -37,7 +39,8 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_ANNOUNCEMENTS,
   INITIAL_WEEKLY_CHALLENGES,
-  INITIAL_STUDENT_GOALS
+  INITIAL_STUDENT_GOALS,
+  INITIAL_LOGIN_HISTORY
 } from '../data/mockData';
 import {
   MASTER_PROBLEM_BANK,
@@ -48,18 +51,40 @@ import {
 } from '../data/problemBank';
 
 const STORAGE_KEYS = {
-  USERS: 'codeclass_users_v2',
-  CURRENT_USER_ID: 'codeclass_current_user_id_v2',
-  PROBLEMS: 'codeclass_problems_v2',
-  CLASSES: 'codeclass_classes_v2',
-  MEMBERS: 'codeclass_members_v2',
-  ASSIGNMENTS: 'codeclass_assignments_v2',
-  SUBMISSIONS: 'codeclass_submissions_v2',
-  NOTIFICATIONS: 'codeclass_notifications_v2',
-  ANNOUNCEMENTS: 'codeclass_announcements_v2',
-  WEEKLY_CHALLENGES: 'codeclass_weekly_challenges_v2',
-  STUDENT_GOALS: 'codeclass_student_goals_v2'
+  USERS: 'codeclass_clean_users_v4',
+  CURRENT_USER_ID: 'codeclass_current_user_id_v4',
+  PROBLEMS: 'codeclass_problems_v4',
+  CLASSES: 'codeclass_classes_v4',
+  MEMBERS: 'codeclass_members_v4',
+  ASSIGNMENTS: 'codeclass_assignments_v4',
+  SUBMISSIONS: 'codeclass_submissions_v4',
+  NOTIFICATIONS: 'codeclass_notifications_v4',
+  ANNOUNCEMENTS: 'codeclass_announcements_v4',
+  WEEKLY_CHALLENGES: 'codeclass_weekly_challenges_v4',
+  STUDENT_GOALS: 'codeclass_student_goals_v4',
+  LOGIN_HISTORY: 'codeclass_login_history_v4'
 };
+
+// Purge any legacy sample data from previous builds
+try {
+  const legacyKeys = [
+    'codeclass_users_v2',
+    'codeclass_current_user_id_v2',
+    'codeclass_problems_v2',
+    'codeclass_classes_v2',
+    'codeclass_members_v2',
+    'codeclass_assignments_v2',
+    'codeclass_submissions_v2',
+    'codeclass_notifications_v2',
+    'codeclass_announcements_v2',
+    'codeclass_weekly_challenges_v2',
+    'codeclass_student_goals_v2',
+    'codeclass_users_v1'
+  ];
+  legacyKeys.forEach((k) => localStorage.removeItem(k));
+} catch {
+  // safe fallback for SSR or restricted environments
+}
 
 class StorageService {
   // Helper to load or initialize
@@ -86,32 +111,74 @@ class StorageService {
 
   // USERS
   getUsers(): User[] {
-    const users = this.load<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
-    // Ensure admin account exists if not already present in storage
-    if (!users.some((u) => u.role === 'ADMIN' || u.id === 'admin-1' || u.email === 'admin@algoclass.io')) {
-      const adminUser = INITIAL_USERS.find((u) => u.id === 'admin-1');
-      if (adminUser) {
-        const merged = [adminUser, ...users];
-        this.save(STORAGE_KEYS.USERS, merged);
-        return merged;
+    const rawUsers = this.load<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
+    let modified = false;
+
+    // Filter out any unauthorized admin accounts other than the designated admin
+    let sanitizedUsers = rawUsers.map((u) => {
+      if (u.email.toLowerCase() === PRIMARY_ADMIN_USER.email.toLowerCase() || u.id === PRIMARY_ADMIN_USER.id) {
+        // Guarantee designated admin credentials
+        if (
+          u.name !== PRIMARY_ADMIN_USER.name ||
+          u.email !== PRIMARY_ADMIN_USER.email ||
+          u.password !== PRIMARY_ADMIN_USER.password ||
+          u.role !== 'ADMIN' ||
+          !u.isAdmin ||
+          !u.isOwner
+        ) {
+          modified = true;
+          return {
+            ...u,
+            id: PRIMARY_ADMIN_USER.id,
+            name: PRIMARY_ADMIN_USER.name,
+            email: PRIMARY_ADMIN_USER.email,
+            password: PRIMARY_ADMIN_USER.password,
+            role: 'ADMIN' as const,
+            isAdmin: true,
+            isOwner: true,
+            title: PRIMARY_ADMIN_USER.title,
+            schoolOrOrg: PRIMARY_ADMIN_USER.schoolOrOrg
+          };
+        }
+        return u;
       }
+      // If any other user had role ADMIN, downgrade to TEACHER
+      if (u.role === 'ADMIN') {
+        modified = true;
+        return {
+          ...u,
+          role: 'TEACHER' as const,
+          isAdmin: false,
+          isOwner: false
+        };
+      }
+      return u;
+    });
+
+    // If primary admin is missing completely, prepend it
+    const hasAdmin = sanitizedUsers.some((u) => u.email.toLowerCase() === PRIMARY_ADMIN_USER.email.toLowerCase());
+    if (!hasAdmin) {
+      sanitizedUsers = [PRIMARY_ADMIN_USER, ...sanitizedUsers];
+      modified = true;
     }
-    return users;
+
+    if (modified) {
+      this.save(STORAGE_KEYS.USERS, sanitizedUsers);
+    }
+
+    return sanitizedUsers;
   }
 
   getUserById(id: string): User | undefined {
     return this.getUsers().find((u) => u.id === id);
   }
 
-  getCurrentUserId(): string {
-    const id = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-    if (!id) {
-      // Default to Teacher 2 (Rahul Sharma) or Student 1
-      const defaultId = 'teacher-2';
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, defaultId);
-      return defaultId;
-    }
-    return id;
+  getCurrentUserId(): string | null {
+    return localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
+  }
+
+  clearCurrentUserId(): void {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
   }
 
   setCurrentUserId(id: string): void {
@@ -124,12 +191,10 @@ class StorageService {
     }
   }
 
-  getCurrentUser(): User {
+  getCurrentUser(): User | null {
     const currentId = this.getCurrentUserId();
-    const user = this.getUserById(currentId);
-    if (user) return user;
-    const users = this.getUsers();
-    return users[0] || INITIAL_USERS[0];
+    if (!currentId) return null;
+    return this.getUserById(currentId) || null;
   }
 
   // AUTH & USER RBAC
@@ -145,6 +210,7 @@ class StorageService {
     user.lastActive = new Date().toISOString();
     this.updateUser(user);
     this.setCurrentUserId(user.id);
+    this.recordLogin(user);
     return { success: true, user };
   }
 
@@ -154,14 +220,20 @@ class StorageService {
   }
 
   createUser(user: Omit<User, 'id' | 'createdAt' | 'solvedCount' | 'totalSubmissions' | 'acceptedSubmissions' | 'streak' | 'lastActive'>): User {
-    // Role must be STUDENT, TEACHER, or ADMIN
-    if (user.role !== 'STUDENT' && user.role !== 'TEACHER' && user.role !== 'ADMIN') {
+    // Only STUDENT and TEACHER can be registered dynamically; Admin is exclusively Nagare Manish
+    if (user.role === 'ADMIN') {
+      throw new Error('Administrator registration is restricted. Only the single designated platform administrator (Nagare Manish) is allowed.');
+    }
+
+    if (user.role !== 'STUDENT' && user.role !== 'TEACHER') {
       throw new Error('Access Denied: Invalid role specified.');
     }
 
     const newUser: User = {
       ...user,
       id: `user-${Date.now()}`,
+      isAdmin: false,
+      isOwner: false,
       streak: 1,
       longestStreak: 1,
       lastLogin: new Date().toISOString(),
@@ -173,7 +245,43 @@ class StorageService {
     };
     const users = [...this.getUsers(), newUser];
     this.save(STORAGE_KEYS.USERS, users);
+    this.setCurrentUserId(newUser.id);
+    this.recordLogin(newUser);
     return newUser;
+  }
+
+  // LOGIN HISTORY (REAL LOGINS ONLY, ADMIN-ONLY ACCESS)
+  recordLogin(user: User): LoginHistoryRecord {
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const loginDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const loginTime = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const isoNow = now.toISOString();
+
+    const record: LoginHistoryRecord = {
+      id: `login-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      loginDate,
+      loginTime,
+      lastLogin: isoNow,
+      lastActive: isoNow
+    };
+
+    const currentHistory = this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY);
+    const updatedHistory = [record, ...currentHistory];
+    this.save(STORAGE_KEYS.LOGIN_HISTORY, updatedHistory);
+    return record;
+  }
+
+  getLoginHistory(requesterUser?: User | null): LoginHistoryRecord[] {
+    // Only ADMIN can view login history
+    if (!requesterUser || (requesterUser.role !== 'ADMIN' && !requesterUser.isAdmin && !requesterUser.isOwner)) {
+      throw new Error('Access Denied: Only administrators have permission to view login history.');
+    }
+    return this.load<LoginHistoryRecord[]>(STORAGE_KEYS.LOGIN_HISTORY, INITIAL_LOGIN_HISTORY);
   }
 
   // PROBLEMS
@@ -1736,6 +1844,7 @@ class StorageService {
     localStorage.removeItem(STORAGE_KEYS.ANNOUNCEMENTS);
     localStorage.removeItem(STORAGE_KEYS.WEEKLY_CHALLENGES);
     localStorage.removeItem(STORAGE_KEYS.STUDENT_GOALS);
+    localStorage.removeItem(STORAGE_KEYS.LOGIN_HISTORY);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
   }
 

@@ -63,6 +63,8 @@ export const Navbar: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  if (!currentUser) return null;
+
   const filteredProblems = searchQuery.trim()
     ? problems.filter((p) => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5)
     : [];

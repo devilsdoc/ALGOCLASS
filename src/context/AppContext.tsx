@@ -223,10 +223,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     storage.getWeeklyChallenges()
   );
   const [studentGoals, setStudentGoals] = useState<StudentGoalWithProgress[]>(() =>
-    storage.getStudentGoals(currentUser.id)
+    currentUser ? storage.getStudentGoals(currentUser.id) : []
   );
   const [notifications, setNotifications] = useState<Notification[]>(() =>
-    storage.getNotificationsForUser(currentUser.id)
+    currentUser ? storage.getNotificationsForUser(currentUser.id) : []
   );
 
   // Toasts
@@ -240,15 +240,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProblems(storage.getProblems());
     setAnnouncements(storage.getAnnouncements());
     setWeeklyChallenges(storage.getWeeklyChallenges());
-    setStudentGoals(storage.getStudentGoals(currentUser.id));
-    setNotifications(storage.getNotificationsForUser(currentUser.id));
-  }, [currentUser.id]);
+    if (currentUser) {
+      setStudentGoals(storage.getStudentGoals(currentUser.id));
+      setNotifications(storage.getNotificationsForUser(currentUser.id));
+    } else {
+      setStudentGoals([]);
+      setNotifications([]);
+    }
+  }, [currentUser?.id]);
 
   // Sync notifications and student goals when current user changes without looping
   useEffect(() => {
-    setNotifications(storage.getNotificationsForUser(currentUser.id));
-    setStudentGoals(storage.getStudentGoals(currentUser.id));
-  }, [currentUser.id]);
+    if (currentUser) {
+      setNotifications(storage.getNotificationsForUser(currentUser.id));
+      setStudentGoals(storage.getStudentGoals(currentUser.id));
+    } else {
+      setNotifications([]);
+      setStudentGoals([]);
+    }
+  }, [currentUser?.id]);
 
   // Adjust active tab when switching role if incompatible
   useEffect(() => {
@@ -580,22 +590,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
 
   const markNotifAsRead = (id: string) => {
+    if (!currentUser) return;
     storage.markNotificationAsRead(id);
     setNotifications(storage.getNotificationsForUser(currentUser.id));
   };
 
   const markAllNotifsAsRead = () => {
+    if (!currentUser) return;
     storage.markAllNotificationsAsRead(currentUser.id);
     setNotifications(storage.getNotificationsForUser(currentUser.id));
     showToast('Notifications Marked Read', 'All alerts marked as read', 'info');
   };
 
   const deleteNotif = (id: string) => {
+    if (!currentUser) return;
     storage.deleteNotification(id);
     setNotifications(storage.getNotificationsForUser(currentUser.id));
   };
 
   const clearAllReadNotifs = () => {
+    if (!currentUser) return;
     storage.clearReadNotifications(currentUser.id);
     setNotifications(storage.getNotificationsForUser(currentUser.id));
     showToast('Cleared', 'Removed all read notifications', 'info');

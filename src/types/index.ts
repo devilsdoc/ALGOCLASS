@@ -28,6 +28,18 @@ export interface User {
   acceptedSubmissions: number;
 }
 
+export interface LoginHistoryRecord {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  loginDate: string; // YYYY-MM-DD
+  loginTime: string; // HH:mm:ss
+  lastLogin: string; // ISO string
+  lastActive: string; // ISO string
+}
+
 export interface ExportFilterOptions {
   userRole: 'ALL' | 'STUDENT' | 'TEACHER' | 'ADMIN';
   dateRange: 'all' | '7d' | '30d' | '90d' | 'custom';
@@ -36,11 +48,10 @@ export interface ExportFilterOptions {
   activityStatus: 'ALL' | 'ACTIVE' | 'INACTIVE';
   includeSheets: {
     allUsers: boolean;
+    loginHistory: boolean;
     students: boolean;
     teachers: boolean;
-    classes: boolean;
-    assignments: boolean;
-    submissions: boolean;
+    admins: boolean;
   };
 }
 
@@ -49,9 +60,7 @@ export interface ExportPreviewStats {
   studentsCount: number;
   teachersCount: number;
   adminsCount: number;
-  classesCount: number;
-  assignmentsCount: number;
-  submissionsCount: number;
+  loginHistoryCount: number;
 }
 
 export type Difficulty = 'Easy' | 'Medium' | 'Hard';
